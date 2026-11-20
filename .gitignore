@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+.DS_Store
+# Локальна база даних: у кожного своя, у Git не потрапляє
+db.sqlite
+instance/
+# Змінні середовища (секрети) та дані контейнерів: у Git не потрапляють
+.env
+data/
+backups/
