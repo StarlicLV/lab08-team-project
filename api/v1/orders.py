@@ -19,6 +19,8 @@ ORDER_SQL = (
     'o.promo_code, o.discount, o.total, o.created_at '
     'FROM orders o JOIN customers c ON c.id = o.customer_id '
 )
+# SQLite INTEGER має знакову 64-бітну межу; відхиляємо значення, які не можна зберегти.
+MAX_SQLITE_INTEGER = 2**63 - 1
 
 
 def get_order_or_404(order_id):
@@ -72,10 +74,12 @@ def validate_order(data):
             product_id, quantity = item.get('product_id'), item.get('quantity')
             if not is_int(product_id) or product_id < 1:
                 errors[f'{key}.product_id'] = 'Має бути цілим числом більше 0'
-            if not is_int(quantity) or quantity < 1:
-                errors[f'{key}.quantity'] = 'Має бути цілим числом більше 0'
+            if not is_int(quantity) or quantity < 1 or quantity > MAX_SQLITE_INTEGER:
+                errors[f'{key}.quantity'] = 'Має бути цілим числом від 1 до 9223372036854775807'
             if f'{key}.product_id' not in errors and f'{key}.quantity' not in errors:
                 items[product_id] = items.get(product_id, 0) + quantity
+                if items[product_id] > MAX_SQLITE_INTEGER:
+                    errors[f'{key}.quantity'] = 'Загальна кількість товару перевищує допустиму межу'
 
     raise_if_errors(errors)
     return customer_id, address, comment, promo_code, items
