@@ -7,9 +7,9 @@
 | Учасник | Частина |
 |---|---|
 | Систалюк Артем (teamlead) | зміни в `app.py` (змінні середовища, `/health`, логування), `.env.example`, `.gitignore`, README, схема архітектури |
-| Учасник 1 | `Dockerfile` і `.dockerignore` |
-| Учасник 2 | `compose.yaml`, `compose.dev.yaml`, `nginx.conf` |
-| Учасник 3 | резервні копії (`scripts/backup.py`), перевірка на чистій системі, Troubleshooting |
+| Марчук Максим | `Dockerfile` і `.dockerignore` |
+| Мельник Віталій | `compose.yaml`, `compose.dev.yaml`, `nginx.conf` |
+| Кубський Максим | резервні копії (`scripts/backup.py`), перевірка на чистій системі, Troubleshooting |
 
 ## Опис
 
