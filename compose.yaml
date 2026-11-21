@@ -1,0 +1,71 @@
+# Production: застосунок (web) за reverse proxy Nginx + резервні копії БД.
+# Запуск:  docker compose up --build -d      Сайт: http://localhost
+
+services:
+  web:
+    build: .
+    image: flask_app:latest        # цю ж назву образу використовує сервіс backup
+    container_name: flask_app
+    expose:
+      - "5000"                     # порт доступний лише іншим контейнерам, назовні не публікується
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/database.db
+    volumes:
+      - sqlite_data:/app/data      # база даних SQLite у named volume
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/app/static:ro
+    depends_on:
+      web:
+        condition: service_healthy   # Nginx стартує, лише коли web став healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Резервні копії БД: раз на добу копіює файл бази в папку ./backups на комп'ютері.
+  # Якщо у учасника 3 є готовий скрипт backup, замініть ним команду нижче.
+  backup:
+    image: flask_app:latest          # той самий образ, що й у web
+    container_name: flask_backup
+    depends_on:
+      - web
+    environment:
+      - DATABASE_PATH=/app/data/database.db
+    volumes:
+      - sqlite_data:/app/data:ro     # БД лише для читання
+      - ./backups:/backups
+    command: ["sh", "-c", "while true; do if [ -f \"$$DATABASE_PATH\" ]; then cp \"$$DATABASE_PATH\" /backups/database_$$(date +%Y%m%d_%H%M%S).db && echo backup done; fi; sleep 86400; done"]
+    healthcheck:
+      disable: true                  # перевірка з Dockerfile тут не підходить: в цьому контейнері немає сервера
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sqlite_data:

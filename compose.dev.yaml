@@ -1,0 +1,21 @@
+# Development: лише web, код підключено з комп'ютера, режим налагодження ввімкнено.
+# Запуск:  docker compose -f compose.dev.yaml up --build       Сайт: http://localhost:5000
+
+services:
+  web:
+    build: .
+    container_name: flask_app_dev
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_PATH=/app/data/database.db
+      - FLASK_DEBUG=1
+      - SECRET_KEY=dev-secret-key
+    volumes:
+      - .:/app                       # код з комп'ютера: зміни видно без перезбирання образу
+      - sqlite_data_dev:/app/data    # ОКРЕМИЙ volume: розробка не псує дані production
+    command: python app.py
+    restart: "no"
+
+volumes:
+  sqlite_data_dev:
