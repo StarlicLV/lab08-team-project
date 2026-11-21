@@ -171,3 +171,56 @@ Nginx ізолює Flask від публічного порту, обслуго�
 ## Висновки
 
 Під час роботи ми запакували Flask-застосунок у Docker, описали production і development середовища через Compose та винесли SQLite у named volume. Nginx передає HTTP-запити до Gunicorn, а health check і restart policy допомагають стежити за доступністю сервісу. Для захисту даних ми створили окремий backup-сервіс, який використовує SQLite backup API, зберігає останні копії та підтримує відновлення. Перевірки включають запуск із чистого клону, збереження даних, стан контейнерів і сценарії усунення типових помилок.
+
+## Docker Compose, Nginx та середовища dev / prod (Мельник Віталій)
+
+### Файли
+
+| Файл | Призначення |
+|---|---|
+| `compose.yaml` | production: сервіси `web`, `nginx`, `backup` |
+| `compose.dev.yaml` | development: лише `web` з підключеним кодом і режимом налагодження |
+| `nginx.conf` | налаштування Nginx як reverse proxy |
+
+### Сервіси та volumes (production, `compose.yaml`)
+
+| Сервіс | Образ | Порт | Призначення |
+|---|---|---|---|
+| `web` | збирається з `Dockerfile` (етап `runtime`) | `expose: 5000` (назовні не відкритий) | Flask-застосунок; `healthcheck` перевіряє `/health` |
+| `nginx` | `nginx:alpine` | `${WEB_PORT:-80}:80` (за замовчуванням 80) | приймає запити з браузера й передає їх у `web`; сам віддає `/static/` |
+| `backup` | той самий `Dockerfile` | немає | запускає `scripts/backup.py`, копії зберігає в `./backups` |
+
+- Named volume `sqlite_data` зберігає базу SQLite в `/app/data`, тому дані не зникають після `docker compose down` та перезбирання образу. Видалити їх можна лише командою `docker compose down -v`.
+- `nginx.conf` і папка `./static` підключені в Nginx лише для читання (`:ro`).
+- `nginx` залежить від `web` з умовою `service_healthy`: Nginx стартує тільки після того, як `web` став `healthy`. Сервіс `backup` теж чекає на `healthy` стан `web`.
+- `restart: unless-stopped` автоматично перезапускає сервіси після збою.
+- Змінні середовища беруться з `.env` (шаблон `.env.example`), шлях до БД задано як `DATABASE_PATH=/app/data/database.db`.
+- Логування: для всіх сервісів драйвер `json-file` з `max-size: 10m` і `max-file: 3`, тому логи не ростуть безмежно. Перегляд: `docker compose logs -f web`.
+
+### Що робить Nginx
+
+Nginx працює як reverse proxy: браузер звертається до порту 80, Nginx передає запити застосунку `http://web:5000` у внутрішній мережі Docker. Зовні порт 5000 закритий. Заголовки `Host`, `X-Real-IP`, `X-Forwarded-For` і `X-Forwarded-Proto` передають застосунку дані про справжнього клієнта й протокол. Запити на `/static/` Nginx обробляє сам (файли з `./static`, кеш на 1 годину, без запису в access log), не навантажуючи Flask. Розмір тіла запиту обмежено `client_max_body_size 2m`.
+
+### Відмінності dev і prod
+
+| | `compose.yaml` (prod) | `compose.dev.yaml` (dev) |
+|---|---|---|
+| Сервіси | web, nginx, backup | лише web |
+| Доступ | `http://localhost` (через Nginx) | `http://localhost:5000` (напряму, змінна `DEV_WEB_PORT`) |
+| Код | у образі | bind mount `.:/app`, зміни видно без перезбирання образу |
+| Режим налагодження | за `.env` (`FLASK_DEBUG=0`) | `FLASK_DEBUG=1` |
+| Volume БД | `sqlite_data` | `dev_sqlite_data` (окремий, не чіпає production) |
+| Перезапуск | `unless-stopped` | `"no"` |
+
+### Запуск
+
+```bash
+# production (потрібен файл .env, його можна створити з .env.example)
+docker compose up --build -d
+docker compose ps                 # у колонці STATUS у web має бути healthy
+# відкрити http://localhost
+
+# development
+docker compose -f compose.dev.yaml up --build
+# відкрити http://localhost:5000
+```
