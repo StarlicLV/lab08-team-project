@@ -15,7 +15,7 @@ services:
     volumes:
       - .:/app
       - dev_sqlite_data:/app/data
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   dev_sqlite_data:
