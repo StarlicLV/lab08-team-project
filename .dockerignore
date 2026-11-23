@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git
+.gitignore
+
+# Секрети та середовища
+.env
+.venv/
+venv/
+env/
+
+# IDE та сміття ОС
+.vscode/
+.idea/
+*.log
+.DS_Store
+
+# Локальні бази даних і резервні копії
+data/
+db.sqlite
+*.sqlite
+backups/
+
+# Не потрібне в робочому образі
+tests/
+docs/
+*.md
+postman*.json
+requirements-dev.txt
+
+# Docker-файли
+Dockerfile
+.dockerignore
+compose*.yaml
+compose*.yml
