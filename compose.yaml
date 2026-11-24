@@ -31,7 +31,7 @@ services:
     image: nginx:alpine
     container_name: nginx_proxy
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./static:/app/static:ro
@@ -45,19 +45,22 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Резервні копії БД: раз на добу копіює файл бази в папку ./backups на комп'ютері.
-  # Якщо у учасника 3 є готовий скрипт backup, замініть ним команду нижче.
+  # SQLite online backup створює узгоджений знімок активної БД.
   backup:
-    image: flask_app:latest          # той самий образ, що й у web
+    image: flask_app:latest          # образ містить застосунок і scripts/backup.py
     container_name: flask_backup
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     environment:
       - DATABASE_PATH=/app/data/database.db
+      - BACKUP_PATH=/app/backups
+      - BACKUP_KEEP=${BACKUP_KEEP:-7}
+      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
     volumes:
-      - sqlite_data:/app/data:ro     # БД лише для читання
-      - ./backups:/backups
-    command: ["sh", "-c", "while true; do if [ -f \"$$DATABASE_PATH\" ]; then cp \"$$DATABASE_PATH\" /backups/database_$$(date +%Y%m%d_%H%M%S).db && echo backup done; fi; sleep 86400; done"]
+      - sqlite_data:/app/data        # SQLite може створювати службові файли поруч із БД
+      - ./backups:/app/backups
+    command: ["python", "scripts/backup.py"]
     healthcheck:
       disable: true                  # перевірка з Dockerfile тут не підходить: в цьому контейнері немає сервера
     restart: unless-stopped
