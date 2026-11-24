@@ -39,6 +39,15 @@ docker compose -f compose.dev.yaml up --build
 
 Сайт у режимі розробки: `http://localhost:5000`.
 
+Для запуску тестів Python без Docker встановіть dev-залежності та виконайте pytest:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+`requirements.txt` містить лише runtime-залежності застосунку; pytest і pytest-cov винесені в `requirements-dev.txt`, щоб не додавати їх у production-образ.
+
 ## Змінні середовища
 
 Змінні задаються у файлі `.env` (шаблон: `.env.example`, сам `.env` у Git не потрапляє).

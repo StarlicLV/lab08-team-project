@@ -9,9 +9,12 @@
 | Повний набір pytest | **633 passed, 18 subtests passed** |
 | Синтаксис `compose.yaml` і `compose.dev.yaml` як YAML | обидва файли розібрані успішно; production містить `web`, `nginx`, `backup`, dev — `web` |
 | Конфігурація backup-сервісу | запускає `python scripts/backup.py`, залежить від healthy `web`, монтує SQLite volume без `:ro`, зберігає копії в `./backups` |
+| Flask через test client на тимчасовій SQLite-БД | `/health`, `/`, `/menu`, `/cart`, `/api/v1/products`, `/api-demo` → 200; порожній `/checkout` → 302; POST товару → 201, наступний GET → 200 |
+| Backup і відновлення на хості | створено копію, змінено БД, відновлено зі знімка; початковий запис повернувся, `PRAGMA integrity_check` → `ok` |
+| Розділення залежностей | pytest/pytest-cov винесені з runtime `requirements.txt` у dev-залежності; це прибирає інструменти тестування з Docker runtime-образу |
 | Docker Compose runtime | не перевірено: Docker Desktop/CLI та WSL 2 не встановлені на цьому ПК |
 
-Тому розмір образу, стани контейнерів, HTTP-відповіді через Nginx, restart policy та збереження даних у Docker позначаються як **не перевірено**. Скріншоти Docker-команд не створювались.
+Статична перевірка YAML не замінює `docker compose config`. Розмір образу, стани контейнерів, HTTP-відповіді через Nginx, restart policy, Docker-volume persistence і bind mount у dev позначаються як **не перевірено**. Скріншоти Docker-команд не створювались.
 
 ## Запуск чекліста після налаштування Docker Desktop
 
