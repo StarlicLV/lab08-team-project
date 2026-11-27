@@ -47,6 +47,7 @@ services:
 
   # SQLite online backup створює узгоджений знімок активної БД.
   backup:
+    build: .
     image: flask_app:latest          # образ містить застосунок і scripts/backup.py
     container_name: flask_backup
     depends_on:
@@ -59,7 +60,7 @@ services:
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
     volumes:
       - sqlite_data:/app/data        # SQLite може створювати службові файли поруч із БД
-      - ./backups:/app/backups
+      - backup_data:/app/backups     # окремий named volume для резервних копій
     command: ["python", "scripts/backup.py"]
     healthcheck:
       disable: true                  # перевірка з Dockerfile тут не підходить: в цьому контейнері немає сервера
@@ -72,3 +73,4 @@ services:
 
 volumes:
   sqlite_data:
+  backup_data:
