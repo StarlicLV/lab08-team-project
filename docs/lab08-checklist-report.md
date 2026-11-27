@@ -8,13 +8,28 @@
 |---|---|
 | Повний набір pytest | **633 passed, 18 subtests passed** |
 | Синтаксис `compose.yaml` і `compose.dev.yaml` як YAML | обидва файли розібрані успішно; production містить `web`, `nginx`, `backup`, dev — `web` |
-| Конфігурація backup-сервісу | запускає `python scripts/backup.py`, залежить від healthy `web`, монтує SQLite volume без `:ro`, зберігає копії в `./backups` |
+| Конфігурація backup-сервісу | запускає `python scripts/backup.py`, залежить від healthy `web`, монтує SQLite volume без `:ro` і окремий named volume `backup_data` для копій |
 | Flask через test client на тимчасовій SQLite-БД | `/health`, `/`, `/menu`, `/cart`, `/api/v1/products`, `/api-demo` → 200; порожній `/checkout` → 302; POST товару → 201, наступний GET → 200 |
 | Backup і відновлення на хості | створено копію, змінено БД, відновлено зі знімка; початковий запис повернувся, `PRAGMA integrity_check` → `ok` |
 | Розділення залежностей | pytest/pytest-cov винесені з runtime `requirements.txt` у dev-залежності; це прибирає інструменти тестування з Docker runtime-образу |
-| Docker Compose runtime | не перевірено: Docker Desktop/CLI та WSL 2 не встановлені на цьому ПК |
+| Docker Compose runtime на локальному ПК | не перевірено: Docker Desktop/CLI та WSL 2 не встановлені на цьому ПК |
 
-Статична перевірка YAML не замінює `docker compose config`. Розмір образу, стани контейнерів, HTTP-відповіді через Nginx, restart policy, Docker-volume persistence і bind mount у dev позначаються як **не перевірено**. Скріншоти Docker-команд не створювались.
+Статична перевірка YAML не замінює `docker compose config`. Розмір образу, persistence volumes, restart policy і цілісність backup позначаються як **не перевірено** до проходження чекліста нижче.
+
+## Перевірки в GitHub Codespaces
+
+За наданими виводами термінала від 27.11.2026:
+
+| Перевірка | Результат |
+|---|---|
+| Development build і запуск | образ зібрався; `flask_app_dev` запустив Flask на `0.0.0.0:5000` |
+| Development health | `GET /health` повернув HTTP 200 |
+| Production Compose config | конфігурація `web`, `nginx`, `backup` розібралася з тестовим in-memory override без `.env` |
+| Production image і сервіси | `flask_app` зібрався, Nginx завантажився, `web` став `healthy`; усі три контейнери стартували |
+| Nginx → Flask → SQLite | запит до `http://127.0.0.1/health` з Nginx повернув `database: connected`, `status: healthy` |
+| Backup write | **не пройшов**: `sqlite3.OperationalError: unable to open database file` під час створення тимчасового файлу в `/app/backups`; каталогу не було підготовлено з правами користувача `app` до монтування volume |
+
+Після виправлення Dockerfile і Compose потрібно повторити production build, підтвердити появу файлу в `backup_data` та перевірити `PRAGMA integrity_check`. Тестовий production Compose використовував окремий volume `lab08-prod-check_backup_check`; він не є робочим volume проєкту.
 
 ## Запуск чекліста після налаштування Docker Desktop
 
@@ -52,11 +67,11 @@ docker compose ps
 
 ## Backup та відновлення
 
-1. Перевірте перший файл у `backups/` і логи `docker compose logs --tail=50 backup`.
+1. Перевірте файли командою `docker compose exec backup ls -l /app/backups` і логи `docker compose logs --tail=50 backup`.
 2. Для перевірки відновлення створіть резервну копію, змініть тестовий запис, зупиніть `web` і `backup`, підставте файл копії замість `<файл-копії>` у команду з README, запустіть сервіси та перевірте повернення даних.
 3. Перевірте SQLite-копію через `PRAGMA integrity_check`; очікуване значення — `ok`.
 
-Скрипт створює копію через SQLite Backup API та атомарне перейменування, а не через `cp`. Сервіс підключає volume БД без `:ro`; з'єднання джерела SQLite відкриває в режимі читання.
+Скрипт створює копію через SQLite Backup API та атомарне перейменування, а не через `cp`. Сервіс підключає volume БД без `:ro`; з'єднання джерела SQLite відкриває в режимі читання. Копії зберігаються в окремому named volume `backup_data`.
 
 ## Development і чистий клон
 
