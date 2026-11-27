@@ -18,10 +18,10 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Окремий користувач без прав адміністратора.
-# Каталог /app/data створюємо і віддаємо йому ДО монтування volume —
-# тоді новий named volume успадкує правильні права.
+# Каталоги для БД і резервних копій створюємо та віддаємо app ДО монтування
+# named volumes — нові volumes успадкують права непривілейованого користувача.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /app/data \
+    && mkdir -p /app/data /app/backups \
     && chown -R app:app /app
 
 # Готове віртуальне середовище з етапу збірки
