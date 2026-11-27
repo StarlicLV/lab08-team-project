@@ -87,26 +87,26 @@ graph LR
     N -->|/static/| S[./static]
     W --> V[(volume sqlite_data: /app/data/database.db)]
     B[backup] --> V
-    B --> BK[(./backups)]
+    B --> BK[(volume backup_data: /app/backups)]
 ```
 
 Користувач звертається до Nginx, який передає запити застосунку Flask (gunicorn), а статичні файли віддає напряму.
 Застосунок зберігає дані у файлі SQLite, що лежить у named volume, тому дані переживають видалення контейнера.
-Окремий сервіс `backup` за розкладом робить копії бази в папку `backups/`.
+Окремий сервіс `backup` за розкладом робить копії бази в named volume `backup_data`.
 
 ## Образ (Dockerfile)
 
 Використовується `python:3.13-slim` у двох етапах. На етапі `builder` залежності встановлюються в окреме віртуальне середовище; у фінальний `runtime` копіюється лише це середовище й потрібні файли застосунку. `requirements.txt` копіюється до вихідного коду, тож зміни шаблонів не змушують Docker повторно встановлювати пакети. `--no-cache-dir` не залишає кеш pip в образі.
 
-Фінальний образ запускається від непривілейованого користувача `app` (UID 10001). Каталог `/app/data` створюється з правами цього користувача до монтування volume. `.dockerignore` прибирає Git-історію, локальне середовище, тести, кеші, базу й резервні копії з контексту збірки. Health check виконує Python-запит до `/health`, тому образу не потрібні `curl` або `wget`.
+Фінальний образ запускається від непривілейованого користувача `app`. Каталоги `/app/data` і `/app/backups` створюються з правами цього користувача до монтування named volumes, щоб застосунок і backup-сервіс могли записувати дані. `.dockerignore` прибирає Git-історію, локальне середовище, тести, кеші, базу й резервні копії з контексту збірки. Health check виконує Python-запит до `/health`, тому образу не потрібні `curl` або `wget`.
 
 Основні директиви: `FROM` задає базовий образ і етап; `RUN` створює середовище та користувача; `WORKDIR` задає робочий каталог; `COPY` переносить залежності й застосунок; `USER` знижує привілеї процесу; `EXPOSE` документує порт; `HEALTHCHECK` перевіряє стан; `CMD` запускає Gunicorn.
 
 ## Сервіси та volumes. Development і production
 
-Production-конфігурація має три сервіси. `web` запускає Flask через Gunicorn і монтує named volume `sqlite_data` у `/app/data`. `nginx` публікує порт `${WEB_PORT:-80}`, передає динамічні запити до `web:5000`, а статичні файли віддає напряму. `backup` запускає `scripts/backup.py`, читає ту саму SQLite-директорію та записує копії у `./backups` на хості. Джерельний том БД змонтовано для backup-сервісу без `:ro`, щоб SQLite мав доступ до службових файлів; сам скрипт відкриває БД у режимі читання та створює копію через SQLite Backup API. Nginx і backup стартують після того, як health check `web` стане успішним.
+Production-конфігурація має три сервіси. `web` запускає Flask через Gunicorn і монтує named volume `sqlite_data` у `/app/data`. `nginx` публікує порт `${WEB_PORT:-80}`, передає динамічні запити до `web:5000`, а статичні файли віддає напряму. `backup` запускає `scripts/backup.py`, читає ту саму SQLite-директорію та записує копії в named volume `backup_data`, змонтований у `/app/backups`. Обидва каталоги volumes створюються в образі з правами користувача `app`, тому backup може створити тимчасовий файл і атомарно опублікувати копію. Джерельний том БД змонтовано для backup-сервісу без `:ro`, щоб SQLite мав доступ до службових файлів; сам скрипт відкриває БД у режимі читання та створює копію через SQLite Backup API. Nginx і backup стартують після того, як health check `web` стане успішним.
 
-Усі production-сервіси мають політику `restart: unless-stopped` та обмеження розміру JSON-логів; перегляд — `docker compose logs -f web` або `docker compose logs -f backup`. Якщо порт 80 зайнятий, установіть `WEB_PORT=8080` у `.env`; dev-порт змінюється через `DEV_WEB_PORT`. У режимі розробки `compose.dev.yaml` запускає Flask з налагодженням на `localhost:5000`, підключає код з робочої теки та використовує окремий `dev_sqlite_data`; Nginx і плановий backup не запускаються.
+Усі production-сервіси мають політику `restart: unless-stopped` та обмеження розміру JSON-логів; перегляд — `docker compose logs -f web` або `docker compose logs -f backup`. Якщо порт 80 зайнятий, установіть `WEB_PORT=8080` у `.env`; dev-порт змінюється через `DEV_WEB_PORT`. У режимі розробки `compose.dev.yaml` запускає Flask з налагодженням, підключає код з робочої теки та використовує окремий volume `sqlite_data_dev`; Nginx і плановий backup не запускаються.
 
 ## Збереження даних SQLite
 
@@ -129,7 +129,7 @@ Docker періодично викликає цей endpoint, і за резул
 
 ## Резервні копії
 
-`scripts/backup.py` відкриває вихідну базу SQLite в режимі читання та створює узгоджений знімок через `sqlite3.Connection.backup()`. Це безпечно під час роботи застосунку; звичайне копіювання файлу могло б зафіксувати неповний стан. Спочатку знімок записується у тимчасовий файл, а потім атомарно перейменовується у `backups/database-<UTC timestamp>.sqlite3`. Після кожного знімка залишаються останні `BACKUP_KEEP` копій (за замовчуванням 7). Перший backup робиться одразу після запуску сервісу, наступні — через `BACKUP_INTERVAL_SECONDS` (за замовчуванням доба). Перебіг і помилки відображаються в stdout: `docker compose logs -f backup`.
+`scripts/backup.py` відкриває вихідну базу SQLite в режимі читання та створює узгоджений знімок через `sqlite3.Connection.backup()`. Це безпечно під час роботи застосунку; звичайне копіювання файлу могло б зафіксувати неповний стан. Спочатку знімок записується у тимчасовий файл, а потім атомарно перейменовується у `/app/backups/database-<UTC timestamp>.sqlite3` на named volume `backup_data`. Після кожного знімка залишаються останні `BACKUP_KEEP` копій (за замовчуванням 7). Перший backup робиться одразу після запуску сервісу, наступні — через `BACKUP_INTERVAL_SECONDS` (за замовчуванням доба). Перебіг і помилки відображаються в stdout: `docker compose logs -f backup`. Список копій можна переглянути командою `docker compose exec backup ls -l /app/backups`.
 
 Щоб відновити конкретну копію, спочатку зупиніть усі процеси, які можуть писати в БД, і підставте ім'я наявного backup замість `<ім'я-файлу>`:
 
@@ -139,11 +139,11 @@ docker compose run --rm --no-deps backup python -c "import os,shutil; shutil.cop
 docker compose up -d web nginx backup
 ```
 
-Після запуску перевірте `docker compose ps` і відкрийте сайт. Команда `docker compose down` не видаляє базу чи копії; `docker compose down -v` видаляє named volumes з базами, тому її застосовуйте лише для навмисного скидання даних.
+Після запуску перевірте `docker compose ps` і відкрийте сайт. Команда `docker compose down` не видаляє базу чи копії; `docker compose down -v` видаляє volumes `sqlite_data` і `backup_data`, тому її застосовуйте лише для навмисного скидання даних.
 
 ## Перевірка на чистій системі та результати
 
-Для перевірки нового клону створіть `.env` з `.env.example`, згенеруйте новий `SECRET_KEY`, перевірте обидві конфігурації командами `docker compose config` та `docker compose -f compose.dev.yaml config`, зберіть образ і запустіть сервіси командами з розділу «Швидкий старт». Потім перевірте стан `docker compose ps`, endpoint `http://localhost/health`, створіть тестове замовлення та виконайте `docker compose down` і `docker compose up -d`; дані мають залишитися в `sqlite_data`. Видаліть контейнер web командою `docker compose exec web python -c "import os,signal; os.kill(1, signal.SIGKILL)"` і перевірте, що restart policy підніме його знову. Файл у `backups/` відкрийте через `sqlite3` або перевірте `PRAGMA integrity_check`; для перевірки відновлення використайте кроки вище. Результати виконаних і непроведених перевірок відмічайте в [`docs/lab08-checklist-report.md`](docs/lab08-checklist-report.md).
+Для перевірки нового клону створіть `.env` з `.env.example`, згенеруйте новий `SECRET_KEY`, перевірте обидві конфігурації командами `docker compose config` та `docker compose -f compose.dev.yaml config`, зберіть образ і запустіть сервіси командами з розділу «Швидкий старт». Потім перевірте стан `docker compose ps`, endpoint `http://localhost/health`, створіть тестове замовлення та виконайте `docker compose down` і `docker compose up -d`; дані мають залишитися у `sqlite_data`. Видаліть контейнер web командою `docker compose exec web python -c "import os,signal; os.kill(1, signal.SIGKILL)"` і перевірте, що restart policy підніме його знову. Перевірте список копій командою `docker compose exec backup ls -l /app/backups`, а цілісність вибраної копії — через `PRAGMA integrity_check`; для перевірки відновлення використайте кроки вище. Результати виконаних і непроведених перевірок відмічайте в [`docs/lab08-checklist-report.md`](docs/lab08-checklist-report.md).
 
 Команди для результатів перевірки:
 
@@ -163,9 +163,9 @@ docker compose exec web python -c "import urllib.request; print(urllib.request.u
 | Немає `.env` | Скопіюйте `.env.example` у `.env` (`Copy-Item .env.example .env` у PowerShell) і задайте власний `SECRET_KEY`. |
 | `ModuleNotFoundError` | Переконайтеся, що залежність є в `requirements.txt`, потім перезберіть образ: `docker compose build --no-cache web`. Не встановлюйте залежність лише локально на хості. |
 | Сторінка не відкривається | Перевірте `docker compose ps` та `docker compose logs -f web nginx`; дочекайтеся `healthy`. Перевірте адресу й порт у `.env`. Застосунок слухає `0.0.0.0:5000` усередині контейнера, а Nginx — порт 80. |
-| `/app/data` недоступний для запису | У Dockerfile каталог створюється для UID 10001. Не монтуйте до нього каталог хоста з несумісними правами; для локального dev видаліть лише dev volume, якщо він був створений з іншими правами. Не запускайте контейнер від root як постійне виправлення. |
+| `/app/data` або `/app/backups` недоступні для запису | Dockerfile створює обидва каталоги з правами користувача `app` до монтування named volumes. Якщо volume створили до цього виправлення, перевірте права всередині контейнера; не видаляйте volume, якщо в ньому є потрібні дані. |
 | Стан `unhealthy` | Перегляньте `docker compose logs web`; перевірте відповідь `/health` та наявність БД у volume. Контейнер з `unhealthy` сам не перезапускається: restart policy реагує на завершення процесу, а не на health status. |
-| Backup-контейнер перезапускається | Перевірте `.env`, доступність `/app/data/database.db` і логи `docker compose logs backup`; скрипт записує помилку та повторює спробу на наступному інтервалі. |
+| Резервна копія не створюється | Перевірте `docker compose logs backup`, наявність `/app/data/database.db` і права `/app/backups` (`docker compose exec backup ls -ld /app/backups`). Backup-контейнер записує помилку і повторює спробу на наступному інтервалі. |
 
 ## Обґрунтування рішень
 
@@ -197,7 +197,7 @@ Nginx ізолює Flask від публічного порту, обслуго�
 |---|---|---|---|
 | `web` | збирається з `Dockerfile` (етап `runtime`) | `expose: 5000` (назовні не відкритий) | Flask-застосунок; `healthcheck` перевіряє `/health` |
 | `nginx` | `nginx:alpine` | `${WEB_PORT:-80}:80` (за замовчуванням 80) | приймає запити з браузера й передає їх у `web`; сам віддає `/static/` |
-| `backup` | той самий `Dockerfile` | немає | запускає `scripts/backup.py`, копії зберігає в `./backups` |
+| `backup` | той самий `Dockerfile` | немає | запускає `scripts/backup.py`, копії зберігає у named volume `backup_data` |
 
 - Named volume `sqlite_data` зберігає базу SQLite в `/app/data`, тому дані не зникають після `docker compose down` та перезбирання образу. Видалити їх можна лише командою `docker compose down -v`.
 - `nginx.conf` і папка `./static` підключені в Nginx лише для читання (`:ro`).
@@ -218,7 +218,7 @@ Nginx працює як reverse proxy: браузер звертається д�
 | Доступ | `http://localhost` (через Nginx) | `http://localhost:5000` (напряму, змінна `DEV_WEB_PORT`) |
 | Код | у образі | bind mount `.:/app`, зміни видно без перезбирання образу |
 | Режим налагодження | за `.env` (`FLASK_DEBUG=0`) | `FLASK_DEBUG=1` |
-| Volume БД | `sqlite_data` | `dev_sqlite_data` (окремий, не чіпає production) |
+| Volume БД | `sqlite_data` | `sqlite_data_dev` (окремий, не чіпає production) |
 | Перезапуск | `unless-stopped` | `"no"` |
 
 ### Запуск
